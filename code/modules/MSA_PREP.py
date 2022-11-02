@@ -74,7 +74,7 @@ class HHFILTER():
                 msa,name=[],[]
                 for i in data:  #seperate name and msa data
                     name.append(i[0:34-1]) #NOTE: the sequences should start in column 34, if output is incorrect change 34 to the column the sequence starts on in the .sto file
-                    seq = self.Split(i[34:-1])
+                    seq = "".join(self.Split(i[34:-1]))
                     msa.append(seq)
                 msa,name,aa = self.Clean_query(msa, name) #aa preserves a.a. positions
                 msa,name = self.Remove_rows(msa, name)
