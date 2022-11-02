@@ -1,7 +1,0 @@
-Activate coevolution environment:
-
-	conda activate coevolution
-
-add this to path to run 
-/Users/schaferjw/git_coevolution/code
-	export PATH="/Users/schaferjw/git_coevolution/code:$PATH"
