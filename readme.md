@@ -12,8 +12,8 @@ For more information: [Porter lab](https://www.nlm.nih.gov/research/researchstaf
     - Example run:
         python fsc.py --msa XXXX.msa --pdb1 XXXX.pdb  --pdb2 YYYY.pdb --Extra n/y
 
-        Note: Extra flag defaults to n if set to y the scripts will generate an additional 6-panel image that compares
-              output and runs the hypergeometric test
+        Note: .msa is stockholm format output from jackhmmer. Extra flag defaults to n if set to y the scripts will generate 
+                an additional 6-panel image that compares output and runs the hypergeometric test
 
     - HMMER3.3.2 was used to generate the multiple sequence alignments to generate an alignment
       An example run is provided (update E-values as needed)
