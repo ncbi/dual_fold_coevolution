@@ -4,32 +4,46 @@
 Created on Fri May 27 15:58:10 2022
 
 @author: schaferjw
+
+Plot predictions on top of the dualfold contact map
+
 """
 import numpy as np
 import pandas as pd
-import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
 class PLOT():
-    def FS_plot(self,pdb1,pdb2,df_dist,df,msa,df_sorted):
+    def FS_plot(self,pdb1,pdb2,df_dist,df,msa,df_sorted,name='n',plddt=['none']):
         colors = {'both':'#767676'}
         counts = df_sorted['sort'].value_counts()
-        if len(counts) == 4 and counts['pdb_1'] > counts['pdb_2']:
+        df['plddt'] = plddt
+        if 'pdb_1' not in counts: counts['pdb_1']  = 0
+        if 'pdb_2' not in counts: counts['pdb_2']  = 0
+        if counts['pdb_1'] > counts['pdb_2']:
             df_sorted = df_sorted.rename({'i':'j', 'j':'i'}, axis=1)
             df_dist = df_dist.rename({'i':'j', 'j':'i'}, axis=1)
             df = df.rename({'i':'j', 'j':'i'}, axis=1)
-            #Make sure the both is always gray
             colors = {'both':'#767676', '{:}'.format(pdb1):'#d8d8d8', '{:}'.format(pdb2):'#000000'}
-        if len(counts) == 4 and counts['pdb_1'] < counts['pdb_2']:
+        if counts['pdb_1'] <= counts['pdb_2']:
             colors = {'both':'#767676', '{:}'.format(pdb2):'#d8d8d8', '{:}'.format(pdb1):'#000000'}
 
+        if plddt[0] != 'none':
+            alphas = ((0-1)/(np.max(plddt)-np.min(plddt)))*(plddt-np.min(plddt)) + 1
+            alphas = [0.5 if alpha > 0.4 else 0.25 if alpha > 0.2 else 0 for alpha in alphas]
+
+        else: alphas = plddt
+        # scale for alphas is reversed so plddt of 80 - 100 gets no added color
+        #                                 plddt of 60 - 80  gets yellow with alpha=0.25
+        #                                 plddt of 0  - 60  gets red    with alpha=0.5
+        plddt_rgba = [[143/255,20/255,2/255,alpha] if alpha == 0.5 else [255/255,191/255,0/255,alpha] if alpha == 0.25 else [0,0,0,0] for alpha in alphas]
         df_plot = df_sorted.copy()
         f, ax = plt.subplots(1,1,figsize=(9,9))
 
         if df_dist.empty == False:
             ax.scatter(x=df_dist['i'], y=df_dist['j'], s=30, c=df_dist['Fold'].map(colors),linewidth=0)
-        ax.scatter(x=df['i'], y=df['j'],c=df['Fold'].map(colors), s=100, linewidth=0, label=df['Fold'])    
+        ax.scatter(x=df['i'], y=df['j'],c=df['Fold'].map(colors), s=100, linewidth=0, label=df['Fold'])
+        ax.scatter(x=df['i'], y=df['j'],c=plddt_rgba, s=100, linewidth=0)
         
         df_plot = df_plot.drop(df_plot[df_plot.group == -1].index)
         df_other = df_plot.loc[df_plot["sort"] == 'noise']
@@ -57,5 +71,9 @@ class PLOT():
         plt.yticks(fontsize=11, weight = 'bold')
 
         #_______________________________________________________________________________________________________________________________
-        name = msa.split('/')
-        plt.savefig('{:}.png'.format(name[-1][:-4]),dpi=600)
+        if name == 'n':
+            name = msa.split('/')
+            plt.savefig('{:}.png'.format(name[-1][:-4]),dpi=200)
+        else:
+            plt.savefig('{:}.png'.format(name),dpi=200)
+            

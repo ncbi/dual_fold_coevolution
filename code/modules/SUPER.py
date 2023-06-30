@@ -4,6 +4,9 @@
 Created on Fri May 27 10:29:08 2022
 
 @author: schaferjw
+
+Functions needed to create the superimposition of coevolutionary predictions
+
 """
 
 import numpy as np
@@ -12,67 +15,66 @@ import os
 from os import listdir
 from os.path import isfile, join
 
-class GMN_Data():
-    def __init__(self,file_in):
-        #load predictions from all subfamily alignements into a dataframe
+class Data():
+    def __init__(self,files,select=['NA']):
+        #load predictions from all subfamily alignements
         self.cwd =  os.getcwd()
-        self.file_in = file_in
+
+        if select[0] != 'NA':files = files[select[1]:select[2]]
         
-        files = [i for i in listdir('{:}/{:}'.format(self.cwd,self.file_in[:-4])) if isfile(join('{:}/{:}'.format(self.cwd,self.file_in[:-4]), i))]
-        raw_predictions = pd.DataFrame(columns=["i","j","apc","zscore","df"])
-        count = 0
-        for file in files:
-            if file[0:6] == 'df_gmn' or file[0:8] == 'df_msatr' and file != 'df_super.csv':
-                count+=1
-                if raw_predictions.empty == True: 
-                    raw_predictions = pd.read_csv('{:}/{:}'.format(self.file_in[:-4],file),index_col=0)
-                    raw_predictions['df'] = file
-                else:
-                    temp = pd.read_csv('{:}/{:}'.format(self.file_in[:-4],file),index_col=0)
-                    temp['df'] = file
-                    raw_predictions = pd.concat([raw_predictions,temp],ignore_index=True)
+        coevolution = [self.Load_Numpy(file) for file in files]
+        coevolution = [self.Normalize(mtx) for mtx in coevolution]
+        coev_super = self.Superposition(coevolution)
         
-        self.raw_predictions = raw_predictions
-        self.count = count
+        #self.mtx predictions will be sent through the rest of the pipeline
+        self.mtx = coev_super
+        
+        if select[0] != 'NA':self.partial = coev_super
+        
+    def Load_Numpy(self,file):
+        zero = np.loadtxt(file,delimiter=",", dtype=float)
+        return zero
     
-    def Super(self):
-	#sort through all predictions
-        temp = self.raw_predictions.copy()
-        dict_av = {}
-        for index,row in temp.iterrows():
-            av = pd.DataFrame(columns=["i","j","apc","zscore"])
-            comp = temp.loc[[index]]
-            if '{:}-{:}'.format(comp['i'][index],comp['j'][index]) not in dict_av:
-                for index_2,row_2 in temp.iterrows():
-                    if row_2['i'] == comp['i'][index] and row_2['j'] == comp['j'][index]:
-                        app = temp.loc[[index_2]]
-                        av = pd.concat([av,app])    
-                        dict_av['{:}-{:}'.format(comp['i'][index],comp['j'][index])] = av
+    def Superposition(self,mtxs):
+        mtxs = np.array(mtxs)
+        mtx_sup = np.zeros((mtxs.shape[1],mtxs.shape[2]))
+        for i in range(mtxs.shape[1]):
+            for j in range(mtxs.shape[2]):
+                mtx_sup[i,j] = np.average(mtxs[:,i,j])
+        return mtx_sup
+                
+    def Normalize(self,mtx):
+        i,j,z = [],[],[]
+        for a in range(mtx.shape[0]):
+            for b in range(mtx.shape[1]):
+                i.append(a)
+                j.append(b)
+                z.append(mtx[a,b])
+        z = np.array(z)
 
-        pd.options.mode.chained_assignment = None  # default='warn'                        
-        final = pd.DataFrame(columns=["i","j","apc","zscore"])
-        for key in dict_av:
-            position = dict_av[key]
-            qid_slice = position['df']
-            qid_slice = [row['df'] for index,row in position.iterrows()]
-            qid_slice = sorted(qid_slice, key = lambda x: x.rsplit('.', 1)[0])
-            if 'df_super.csv' in qid_slice:
-                qid_slice.remove('df_super.csv')
-            qid_slice = '-'.join(qid_slice)
-            temp = position.iloc[[0]]
-            apc = temp['apc']
-            zscore = temp['zscore']
+        output = ((1.0-0.0)/(np.max(z)-np.min(z)))*(z-np.min(z)) + 0.0
 
-            for index,row in position.iterrows():
-                apc = (row['apc'] + apc) 
-                zscore = (row['zscore'] + zscore)
-            apc = apc / len(position.index)
-            zscore = zscore / len(position.index)
-            temp['apc'] = apc
-            temp['zscore'] = zscore
-            temp['freq'] = position.shape[0] / self.count
-            temp['df'] = qid_slice
-            final = pd.concat([final,temp])
+        zero = np.zeros(mtx.shape)
+        for idx in range(len(output)):
+            zero[i[idx],j[idx]] = output[idx] 
+        return zero
+    
+    def Most_Probable(self,N_r=2):
+        mtx=self.mtx
+        #N_r dictates the number of high confidence points that will be returned
+        N_r = int(N_r*mtx.shape[0])
 
-        path = self.cwd+'/{:}/df_super.csv'.format(self.file_in[:-4])
-        final.to_csv(r'{:}'.format(path))
+        N = int(mtx.shape[0])
+        i,j,z = [],[],[]
+        for a in range(mtx.shape[0]):
+            for b in range(mtx.shape[1]):
+                i.append(a)
+                j.append(b)
+                z.append(mtx[a,b])
+        df = pd.DataFrame({'i': i, 'j': j,'zscore': z})
+        top = df.loc[df['j'] - df['i'] >= 3].sort_values("zscore",ascending=False)
+        temp = top.head(N_r)
+
+        return temp
+    
+    def Partial(self):return self.partial

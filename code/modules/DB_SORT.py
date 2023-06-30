@@ -4,6 +4,8 @@
 Created on Mon Aug  1 14:32:20 2022
 
 @author: schaferjw
+
+Filter predictions based on density to improve signal / noise
 """
 
 import numpy as np
@@ -17,26 +19,21 @@ from os import listdir
 from os.path import isfile, join
 
 class DB_SCAN():
-    def __init__(self,df,xcontact,alignment='n'):
+    def __init__(self,df_super,xcontact,alignment='n'):
         #search for optimal alignment to dual fold xcrytal contacts
         if alignment == 'n':
             result = []
             for o in range(-75,76):
-                temp = df.copy()
+                temp = df_super.copy()
                 temp['i'] = temp['i'] + o
                 temp['j'] = temp['j'] + o
-                
-                count = 0
-                for index,row in temp.iterrows():
-                    if (int(row['i']),int(row['j'])) in xcontact or (int(row['j']),int(row['i'])) in xcontact:
-                        count+=1
-                    else:flag=False
-                if flag == False:result.append((o,count))
+                count = sum([True for index,row in temp.iterrows() if (int(row['i']),int(row['j'])) in xcontact or (int(row['j']),int(row['i'])) in xcontact])
+                result.append((o,count))
+
             best = result[0]
-            temp = df.copy()
+            temp = df_super.copy()
             for i in result:
-                if i[1] > best[1]:
-                    best = i
+                if i[1] > best[1]:best = i
             temp['i'] = temp['i'] + best[0]
             temp['j'] = temp['j'] + best[0]
 
@@ -44,9 +41,9 @@ class DB_SCAN():
             self.alignment = best[0]
         else:
             self.alignment = int(alignment)
-            df['i'] = df['i'] + int(alignment)
-            df['j'] = df['j'] + int(alignment)
-            self.align = df
+            df_super['i'] = df_super['i'] + int(alignment)
+            df_super['j'] = df_super['j'] + int(alignment)
+            self.align = df_super
 
     def Return_Alignment(self): return self.alignment
     
@@ -68,15 +65,16 @@ class DB_SCAN():
         
         return points
     
-    def Run(self,x_first,x_second,x_common,msa, no_filter='n'):
+    def Run(self,x_first,x_second,x_common,msa,query_length, no_filter='n'):
         
         #define input to find optimal parameters 
         contacts = self.align[['i','j']].to_numpy()
         knee = self.DB_opt(contacts)
         num = 50
         param,best = [],[]
-	#search around the "knee" of the graph to construct an ROC curve
+	    #search around the "knee" of the graph to construct an ROC curve
         for a in np.linspace(knee*0.25,knee*1.1,num=num):
+
             points_sort = {}
             min_samples = 2 
             points = self.DB(contacts,a,min_samples)
@@ -85,62 +83,50 @@ class DB_SCAN():
                     points_sort[key] = self.GMN_decomp(np.array(points[key]), x_first, x_second, x_common)
                 elif no_filter == 'y':
                     points_sort[key] = self.GMN_decomp(np.array(points[key]), x_first, x_second, x_common)
-            df_sorted = pd.DataFrame(columns=["i","j","apc","zscore","gmn_x_freq","group","sort","r"])
+            df_sorted = pd.DataFrame(columns=["i","j","zscore","group","sort","r"])
+            if 'df' in self.align:self.align = self.align.drop(['df'], axis=1)
             for key in points_sort:
-                for contact in points_sort[key]:
-                    temp = self.align.loc[(self.align['i'] == contact[0]) & (self.align['j'] == contact[1])]
-                    temp['gmn_x_freq'] = temp['zscore'] * temp['freq']
-                    temp['group'] = key
-                    temp['sort']  = contact[2]
-                    temp['r']     = contact[3]
-                    df_sorted = df_sorted.append(temp)
-           
-	    #find tpr and fpr for this iteration 
+                if no_filter == 'n':
+                    temp_df = pd.DataFrame(columns=["i","j","zscore","group","sort","r"])
+                    data = [self.align.loc[(self.align['i'] == contact[0]) & (self.align['j'] == contact[1])].values.tolist()[0] + [key] + contact[2:] for contact in points_sort[key]]
+                    temp_df['i'],temp_df['j'],temp_df['zscore'],temp_df['group'],temp_df['sort'],temp_df['r'] = zip(*data)
+                    df_sorted = df_sorted.append(temp_df)
+	     #find tpr and fpr for this iteration 
             if no_filter == 'n':
                 p = df_sorted.drop(df_sorted[df_sorted.group == -1].index).copy()
-                n = df_sorted.drop(df_sorted[df_sorted.group != -1].index).copy()
+                n = df_sorted.loc[df_sorted['group'] == -1]
                 if p.empty != True:
                     if 'noise' in p['sort'].unique():tp = len(p.index)-p['sort'].value_counts().loc[['noise']].item() #total-noise
                     else:tp=len(p.index)
                     if 'noise' in n['sort'].unique():fn = len(n.index)-n['sort'].value_counts().loc[['noise']].item() #total-noise
                     else:fn=len(n.index)
-                    tpr = tp/(tp+fn)
+                    if tp == 0 and fn == 0:tpr = 0
+                    else: tpr = tp/(tp+fn)
                     if 'noise' in p['sort'].unique():fp = p['sort'].value_counts().loc[['noise']].item() #noise
                     else:fp=0
                     if 'noise' in n['sort'].unique():tn = n['sort'].value_counts().loc[['noise']].item() #noise
                     else:tn=0
-                    fpr = fp/(fp+tn)
-                
+                    if fp == 0 and tn == 0: fpr = 0
+                    else:fpr = fp/(fp+tn)
                     if not param:param = [[fpr,tpr,a,min_samples,len(df_sorted[df_sorted['group'] != -1].index)]]
                     if param[-1][0] != fpr and param[-1][1] != tpr:
                         param.append([fpr,tpr,a,min_samples,len(df_sorted[df_sorted['group'] != -1].index)])
+                else:param = [[1,1,a,min_samples,len(df_sorted[df_sorted['group'] != -1].index)]]
             else:param = [[1,1,a,min_samples,len(df_sorted[df_sorted['group'] != -1].index)]]
-
-        files = [i for i in listdir('{:}'.format(msa[:-4])) if isfile(join('{:}'.format(msa[:-4]), i))]
-        files = [file for file in files if file[0:2] == 'df']
+        if len(param) > 1 and param[0][0] == 1 and param[0][1] == 1:param.pop(0)
+        files = [i for i in listdir('gmn') if isfile(join('gmn', i))]
+        files = [file for file in files if file[0:6] == 'df_gmn']
         files = sorted(files, key = lambda x: x.rsplit('.', 1)[0])
-        df_orig = pd.read_csv('{:}/{:}'.format(msa[:-4],files[0]),index_col=0)
-        min_pred = len(df_orig.index)
         
         for i in range(len(param)-1): #define best point on ROC curve
             y = param[i+1][1] - param[i][1]
             x = param[i+1][0] - param[i][0]
-            if y/x < 1 and param[i][4] > min_pred:
+            if y/x < 1 and param[i][4] > query_length*2:
                 best = param[i]
                 break
+        # if there is no improvement return the last point on the ROC curve (retain the most information)
         
-        if not best: # if there is no improvement return the last point on the ROC curve (retain the most information)
-            best = param[-1]
-        
-        if no_filter == 'n': #create png of ROC curve
-            fig, axs = plt.subplots(figsize=(6, 6))
-            df_param = pd.DataFrame(param,columns=['fpr','tpr','eps','min_samples','min_pred'])
-            df_param.plot.scatter(x='fpr',y='tpr', ax=axs)
-            df_best = pd.DataFrame([best],columns=['fpr','tpr','eps','min_samples','min_pred'])
-            df_best.plot.scatter( x='fpr',y='tpr', ax=axs, color='r')
-            axs.set_ylim(0,1)
-            axs.set_xlim(0,1)
-            fig.savefig("roc.png")
+        if not best: best = param[-1]
             
         self.eps = best[2:]
         points_sort = {}
@@ -151,16 +137,14 @@ class DB_SCAN():
             elif no_filter == 'y':
                 points_sort[key] = self.GMN_decomp(np.array(points[key]), x_first, x_second, x_common)
                 
-        df_sorted = pd.DataFrame(columns=["i","j","apc","zscore","gmn_x_freq","group","sort","r"])
+        df_sorted = pd.DataFrame(columns=["i","j","zscore","group","sort","r"])
         for key in points_sort:
             for contact in points_sort[key]:
                 temp = self.align.loc[(self.align['i'] == contact[0]) & (self.align['j'] == contact[1])]
-                temp['gmn_x_freq'] = temp['zscore'] * temp['freq']
                 temp['group'] = key
                 temp['sort']  = contact[2]
                 temp['r']     = contact[3]
                 df_sorted = df_sorted.append(temp)  
-       
 	#remove sequence predicitons that are outside of the xcrystal region 
         df_sorted = self.Trim_Lower(df_sorted)
         df_sorted = self.Trim_Upper(df_sorted)
@@ -193,7 +177,7 @@ class DB_SCAN():
     def EPS(self):return self.eps
     def DB_opt(self,predictions):
         #Algorithm for finding the "elbow" of a graph, this gives a reasonable starting point
-	#original work: https://ieeexplore.ieee.org/document/5961514
+	    #original work: https://ieeexplore.ieee.org/document/5961514
         nbrs = NearestNeighbors(n_neighbors=4)
         nbrs_fit = nbrs.fit(predictions)
         distances, indices = nbrs_fit.kneighbors(predictions)
@@ -208,7 +192,7 @@ class DB_SCAN():
 
     def Sort_fold(self,pdb_1_r,pdb_2_r,common_r):
         #define which xcrystal structure contact a predicion matches (note: predictions are allowed to be off by +-1)
-        if pdb_1_r[0] > 1.5 and pdb_2_r[0] > 1.5 and common_r[0] > 1.5:return ['noise', min(pdb_1_r[0],pdb_2_r[0],common_r[0])]
+        if pdb_1_r[0] > 2.9 and pdb_2_r[0] > 2.9 and common_r[0] > 2.9:return ['noise', min(pdb_1_r[0],pdb_2_r[0],common_r[0])]
         else:
             if common_r[0] == 0:                                      return ['common', min(pdb_1_r[0],pdb_2_r[0],common_r[0])]
             if common_r[0]< pdb_1_r[0] and common_r[0] < pdb_2_r[0]:  return ['common', min(pdb_1_r[0],pdb_2_r[0],common_r[0])]

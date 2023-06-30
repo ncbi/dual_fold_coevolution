@@ -4,18 +4,22 @@
 Created on Thu Aug 18 10:03:58 2022
 
 @author: schaferjw
+
+run hypergeometric test to calculate a P-value corresponding to the statistical significance of the predictions
+compared to the original coevolutionary calculations (GREMLIN/MSATransformer)
 """
 
 from scipy.stats import hypergeom
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from biopandas.pdb import PandasPdb
 
 class HYPERGEO():
     def __init__(self,pdb1,pdb2,msa,df_gmn_msatr):
 	#load information for calculating p-value
         df_xcontact = pd.read_csv('{:}/df_xcontact.csv'.format(msa[:-4]),index_col=0)
-        df_xcontact_dist = pd.read_csv('{:}/df_xcontact_dist.csv'.format(msa[:-4]),index_col=0)
+        df_xcontact_dist = pd.read_csv('{:}/df_dist_xcontact.csv'.format(msa[:-4]),index_col=0)
         xcontact = pd.concat([df_xcontact,df_xcontact_dist])
         pairs = xcontact[['i','j']].to_numpy()
         points = np.array([(0,1),(1,0),(0,-1),(-1,0),(1,1),(-1,-1),(-1,1),(1,-1)] )
@@ -42,4 +46,3 @@ class HYPERGEO():
         pmf_pred = rv.pmf(x)
         
         print('P-value: {:}'.format(sum(pmf_pred[k:])))
-        

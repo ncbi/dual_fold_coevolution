@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-This is adapted from https://github.com/sokrypton/GREMLIN_CPP/blob/master/GREMLIN_TF.ipynb
+Created on Mon Aug  1 14:32:20 2022
 
 @author: schaferjw
+This code runs the GREMLIN algorithm on MSAs passed to it. This is adapted from https://github.com/sokrypton/GREMLIN_CPP/blob/master/GREMLIN_TF.ipynb
+
 """
 import numpy as np
 import pandas as pd
@@ -12,16 +14,15 @@ tf.disable_eager_execution()
 from scipy import stats
 from scipy.spatial.distance import pdist,squareform
 
-def Start(msa_d,file,scale_pred):
+def Start(msa_d,file,scale_pred,query_length):
     # Read in files and run
     name,msa_in,aa = Separate(msa_d,file)
-    
     import warnings #ignore deprecation warnings
     warnings.filterwarnings("ignore", category=DeprecationWarning)    
     msa = mk_msa(msa_in,aa)
     mrf = GREMLIN(msa)
-    top = Make_DataFrame(mrf,msa,msa_in,scale_pred)
-    return top
+    full = Make_DataFrame(mrf,msa,msa_in,scale_pred,query_length)
+    return full
 
 def sym_w(w):
     '''symmetrize input matrix of shape (x,y,x,y)'''
@@ -240,11 +241,9 @@ def mk_msa(seqs,aa):
   # msa, v_idx = filt_gaps(msa_ori,1.0)
 
   msa, v_idx = preserve_positions(msa_ori,aa)
-
   
   # compute effective weight for each sequence
   msa_weights = get_eff(msa,0.8)
-
   # compute effective number of sequences
   ncol = msa.shape[1] # length of sequence
   w_idx = v_idx[np.stack(np.triu_indices(ncol,1),-1)]
@@ -284,14 +283,19 @@ def get_mtx(mrf):
          "zscore": normalize(apc)}
   return mtx
 
-def Make_DataFrame(mrf,msa,msa_in,scale_pred):
+def Make_DataFrame(mrf,msa,msa_in,scale_pred,query_length):
     mtx = get_mtx(mrf)  
     # load mtx into pandas dataframe
     pd_mtx = pd.DataFrame(mtx,columns=["i","j","apc","zscore"])
+    
+    temp = pd_mtx
+    N = int(query_length)
+    zero = np.zeros((N,N))
+    for index, row in temp.iterrows():
+        zero[int(row['i']-1),int(row['j']-1)] = row['zscore']
+        zero[int(row['j']-1),int(row['i']-1)] = row['zscore']
 
-    # get contacts with sequence seperation > 3 return top predictions by zscore
-    top = pd_mtx.loc[pd_mtx['j'] - pd_mtx['i'] > 3].sort_values("zscore",ascending=False)
-    return top.head(int(scale_pred*len(msa_in[0])))
+    return zero
 
 def Separate(msa,file):
     #isolate sequences for coevolutionary analysis 
@@ -302,7 +306,8 @@ def Separate(msa,file):
     data_set_1 = [line.strip() for line in open(msa+'/'+file, 'r')]
     msa,name=[],[]
     for i in data_set_1:  #seperate name and msa data
-        name.append(i[0:32].replace(" ","")) #no spaces
-        msa.append(i[32:-1].replace(" ",""))
+        seq = i.split(' ')
+        name.append(seq[0])
+        msa.append(seq[-1])
 
     return name, msa, aa

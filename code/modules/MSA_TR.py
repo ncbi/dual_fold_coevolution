@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-This is adapted from https://github.com/rmrao/msa-transformer
+This code runs the MSATransformer algorithm on MSAs passed to it. This is adapted from https://github.com/rmrao/msa-transformer
 
 @author: schaferjw
 """
 import esm
 import torch
-import difflib
 from Bio import SeqIO
 import itertools
 from typing import List, Tuple
@@ -44,7 +43,7 @@ def normalize(x):
   return((x-x_mean)/x_std)
 
 
-def Make_DataFrame(tensor_in,output):
+def Make_DataFrame(tensor_in,output,query_length):
     mrf = tensor_in
     
     temp = {'i':[],'j':[],'zscore':[]}
@@ -56,20 +55,20 @@ def Make_DataFrame(tensor_in,output):
       
     pd_mtx = pd.DataFrame.from_dict(temp)
     
+    temp = pd_mtx
+    N = int(query_length)
+    zero = np.zeros((N,N))
+    for index, row in temp.iterrows():
+        zero[int(row['i']),int(row['j'])] = row['zscore']
+        zero[int(row['j']),int(row['i'])] = row['zscore']
+    
     top = pd_mtx.loc[pd_mtx['j'] - pd_mtx['i'] > 3].sort_values("zscore",ascending=False)
 
-    return top.head(int(output*mrf.shape[0]))
+    return top.head(int(output*mrf.shape[0])),zero
 
-def MSA_TR(msa,files,Beg=0,End=0):
+def MSA_TR(msa,files,output,query_length,Beg=0,End=0):
     #run msa transformer on all alignments
     print('Start msa transformer...')
-    output = np.array([])
-    for i in files:
-        num_temp = sum(1 for line in open('{:}/{:}'.format(msa,i)))
-        output = np.append(output,num_temp)
-    output = ((2.-1.5)/(np.max(output)-np.min(output)))*(output-np.min(output)) + 1.5
-    if np.isnan(output[0]) == True:
-        output[0] = 2.0
     msa_data = []
     for i in files:
         temp = read_msa("{:}/{:}".format(msa,i),64)
@@ -86,7 +85,6 @@ def MSA_TR(msa,files,Beg=0,End=0):
                 temp_edit.append(short)
             temp = temp_edit
         msa_data.append(temp)
-    
     msa_transformer, msa_alphabet = esm.pretrained.esm_msa1b_t12_100M_UR50S()
     msa_batch_converter = msa_alphabet.get_batch_converter()
     msa_batch_labels, msa_batch_strs, msa_batch_tokens = msa_batch_converter(msa_data)
@@ -95,9 +93,10 @@ def MSA_TR(msa,files,Beg=0,End=0):
     msa_contacts = msa_transformer.predict_contacts(msa_batch_tokens).cpu()
     
     for n in range(len(files)):
-        top = Make_DataFrame(msa_contacts[n], output[n])
+        top,full = Make_DataFrame(msa_contacts[n], output[n],query_length)
         top['i'] = top['i'] + Beg
         top['j'] = top['j'] + Beg
-        top.to_csv('{:}/df_msatr_{:}.csv'.format(msa,files[n][:-4]))
+        np.savetxt('msatr/full_{:}.csv'.format(files[n][:-4]), full, delimiter=",")
+
 
             
